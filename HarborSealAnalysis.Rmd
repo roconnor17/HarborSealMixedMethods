@@ -1,0 +1,1204 @@
+---
+title: "HarborSealsAnalyis"
+output: html_document
+date: "2023-12-07"
+editor_options: 
+  chunk_output_type: console
+---
+```{r setup, include=FALSE}
+library(ggplot2)
+library(ggpubr)
+library(rnoaa)
+library(dplyr)
+library(tidyr)
+library(hrbrthemes)
+library(readr)
+library(stringr)
+library(hrbrthemes)
+library(viridis)
+library(gdata)
+library(ggpubr)
+library(AICcmodavg)
+library(ncdf4)
+library(tidyverse)
+library(MASS)
+library(mgcv)
+library(tidyr)
+library(reshape2)
+
+theme_set(theme_bw())
+#knitr::opts_chunk$set(echo = TRUE, fig.height = 6, fig.width = 8)
+setwd("~/Documents/Graduate School/Chapter2")
+
+#Importing and formatting harbor seal population counts from BayNet observers at West Beach (HMS)
+
+WestBeach <- read.csv(file = "WestBeachClean.csv")
+head(WestBeach)
+
+WestBeach$Date <- as.Date(WestBeach$Date , format = "%m/%d/%y")
+head(WestBeach)
+
+WestBeach$Julian <- format(WestBeach$Date , format = "%j")
+WestBeach$Julian <- as.numeric(WestBeach$Julian)
+
+WestBeach$Month <- format(as.Date(WestBeach$Date, format="%d/%m/%Y"),"%m")
+WestBeach$Year <- format(as.Date(WestBeach$Date, format="%d/%m/%Y"),"%y")
+WestBeach$Day <- format(as.Date(WestBeach$Date, format="%d/%m/%Y"),"%d")
+WestBeach$MonthYear <- paste(WestBeach$Month, WestBeach$Year, sep="_") 
+
+WestBeachClean <- subset(WestBeach, select = c(
+  Month, 
+  Day, 
+  Year, 
+  Date, 
+  Time, 
+  Otters,
+  hSeals,
+  eSeals,
+  MonthYear,
+  Julian)) %>%
+  na.omit(WestBeach)
+
+WestBeachClean$Year <- as.numeric(WestBeachClean$Year)
+WestBeachClean$Julian <- as.numeric(WestBeachClean$Julian)
+WestBeachClean$Year <- as.character(WestBeachClean$Year)
+
+jpeg("LongTermPopulation.jpeg", quality = 100)
+boxplot (hSeals~Year, data=WestBeachClean)
+dev.off()
+
+start_date <- min(WestBeachClean$Date, na.rm = TRUE)
+end_date <- max(WestBeachClean$Date, na.rm = TRUE)
+all_dates <- seq.Date(from = start_date, to = end_date, by = "day")
+
+all_dates_df <- data.frame(date = all_dates)
+all_dates_df$Date <- all_dates_df$date
+
+WestBeachClean <- merge(all_dates_df, WestBeachClean, by = "Date", all = TRUE)
+
+WestBeachSmoothPlotLegend <- ggplot(data=WestBeachClean, aes(x=Julian, y=hSeals, group=Year, color=Year)) +
+    geom_smooth() +
+    scale_color_viridis(discrete = TRUE) +
+    ggtitle("West Beach Harbor Seal Counts (Loess with .95 CI)") +
+    theme() +
+    ylab("Seals Hauled Out") +
+    xlab("Julian Date")+
+    theme(legend.position = "right") +
+    theme(axis.text=element_text(size=6)) +
+    scale_x_continuous(breaks=seq(0,366,by=25))
+
+ggsave(WestBeachSmoothPlotLegend, filename = "SmoothAllYears_hSealsLegend.pdf", 
+       width = 11, height = 8, units = "in") 
+```
+
+```{R}
+FishSDM_Mbay <- read.csv(file = "CCS_Species_MBay.csv") %>% 
+  filter(time != "UTC") 
+
+##Assuming that "NaN" means 0 probability of occurrence - unsure if that's a reasonable assumption?
+FishSDM_Mbay[FishSDM_Mbay == "NaN"] <- "0"
+
+FishSDM_Mbay$Date <- as.Date(substr(FishSDM_Mbay$time, 1, 10))
+
+FishSDM_Mbay$anchovy_BRT <- as.numeric(FishSDM_Mbay$anchovy_BRT)
+FishSDM_Mbay$anchovy_GAM <- as.numeric(FishSDM_Mbay$anchovy_GAM)
+FishSDM_Mbay$PacificMackerel_BRT <- as.numeric(FishSDM_Mbay$PacificMackerel_BRT)
+FishSDM_Mbay$PacificMackerel_GAM <- as.numeric(FishSDM_Mbay$PacificMackerel_GAM)
+FishSDM_Mbay$herring_BRT <- as.numeric(FishSDM_Mbay$herring_BRT)
+FishSDM_Mbay$herring_GAM <- as.numeric(FishSDM_Mbay$herring_GAM)
+FishSDM_Mbay$jackMackerel_BRT <- as.numeric(FishSDM_Mbay$jackMackerel_BRT)
+FishSDM_Mbay$jackMackerel_GAM <- as.numeric(FishSDM_Mbay$jackMackerel_GAM)
+FishSDM_Mbay$sardine_BRT <- as.numeric(FishSDM_Mbay$sardine_BRT)
+FishSDM_Mbay$sardine_GAM <- as.numeric(FishSDM_Mbay$sardine_GAM)
+FishSDM_Mbay$marketSquid_BRT <- as.numeric(FishSDM_Mbay$marketSquid_BRT)
+FishSDM_Mbay$marketSquid_GAM <- as.numeric(FishSDM_Mbay$marketSquid_GAM)
+
+FishSDM_Mbay_Sum <- FishSDM_Mbay %>%
+  group_by(Date) %>%
+  dplyr::summarize(
+    anchovy_BRT = mean(anchovy_BRT),
+    anchovy_GAM = mean(anchovy_GAM),
+    PacificMackerel_BRT = mean(PacificMackerel_BRT),
+    PacificMackerel_GAM = mean(PacificMackerel_GAM),
+    herring_BRT = mean(herring_BRT),
+    herring_GAM = mean(herring_GAM),
+    jackMackerel_BRT = mean(jackMackerel_BRT),
+    jackMackerel_GAM = mean(jackMackerel_GAM),
+    sardine_BRT = mean(sardine_BRT),
+    sardine_GAM = mean(sardine_GAM),
+    marketSquid_BRT = mean(marketSquid_BRT),
+    marketSquid_GAM = mean(marketSquid_GAM)
+    )
+
+ggplot(FishSDM_Mbay_Sum, aes(x=Date)) + 
+  geom_line(aes(y = anchovy_GAM), color = "darkred") + 
+  geom_line(aes(y = sardine_GAM), color = "blue") +
+  geom_line(aes(y = marketSquid_GAM), color = "green")
+
+colors <- c(
+  "Anchovy" = "darkred",
+  "Sardine" = "blue",
+  "Market Squid" = "green",
+  "Jack Mackerel" = "purple",
+  "Pacific Mackerel" = "pink"
+)
+
+FishSDM_WestBeach <- merge(
+  WestBeachClean, 
+  FishSDM_Mbay_Sum, 
+  by="Date", all.x=TRUE) #%>% na.omit(FishSDM_WestBeach)
+
+```
+
+```{R}
+ModelData <- subset(FishSDM_WestBeach, select = -c(Julian))
+
+ModelData$julian <- vapply(ModelData$Date, \(x) julian(x, origin = as.Date(paste0(lubridate::year(x), "-01-01"))), numeric(1))
+```
+
+
+```{R}
+#1-year chunked annual time lag
+
+# Extract the year from the date column
+ModelData$Year <- as.numeric(ModelData$Year)
+# Create a copy of the original data to work on
+ModelDataAnnual <- ModelData
+#ModelDataAnnual[ModelDataAnnual == "NaN"] <- "0"
+#ModelDataAnnual <- subset(ModelDataAnnual, select=-c(seals_fit,seals_log_se))
+#ModelDataAnnual <- left_join(Seals, ModelDataAnnual, by="Date")
+
+# Extract the year from the date column (assuming the date column is named 'date')
+ModelDataAnnual$year <- year(ModelDataAnnual$Date)
+
+# Calculate the yearly average for each variable
+yearly_means <- ModelDataAnnual %>%
+  group_by(year) %>%
+  summarise(
+    anchovy_BRT_prev_avg = mean(anchovy_BRT, na.rm = TRUE),
+    PacificMackerel_BRT_prev_avg = mean(PacificMackerel_BRT, na.rm = TRUE),
+    herring_BRT_prev_avg = mean(herring_BRT, na.rm = TRUE),
+    jackMackerel_BRT_prev_avg = mean(jackMackerel_BRT, na.rm = TRUE),
+    sardine_BRT_prev_avg = mean(sardine_BRT, na.rm = TRUE),
+    marketSquid_BRT_prev_avg = mean(marketSquid_BRT, na.rm = TRUE),
+    hSeals_prev_avg = mean(hSeals, na.rm = TRUE)
+  )
+
+# Shift the yearly average to align with the next year
+yearly_means$year <- yearly_means$year + 1
+
+# Merge the main dataframe with the yearly means dataframe
+ModelDataAnnual <- left_join(ModelDataAnnual, yearly_means, by = "year")
+
+ModelCorrelation <- as.data.frame(
+  ModelDataAnnual[c(7,23,24,25,26,27,28,29)]
+) %>% drop_na()
+
+str(ModelCorrelation)
+
+# Compute the cross-correlation matrix
+# This function computes correlation between all pairs of columns in the dataframe
+correlation_matrix <- cor(ModelCorrelation, use = "complete.obs")
+
+# View the correlation matrix
+print(correlation_matrix)
+
+correlation_matrix_long <- melt(correlation_matrix)
+
+# Plot the heatmap
+ggplot(correlation_matrix_long, aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  geom_text(aes(label = sprintf("%.2f", value)), vjust = 1) + 
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Pearson\nCorrelation") +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "", y = "")
+
+M1 <- gam(
+  hSeals ~ hSeals_prev_avg + anchovy_BRT_prev_avg + PacificMackerel_BRT_prev_avg + 
+           jackMackerel_BRT_prev_avg + sardine_BRT_prev_avg +
+           marketSquid_BRT_prev_avg + s(julian, bs = "cc", k = 20),
+  data = ModelDataAnnual %>% filter(as.numeric(Year) < 18) %>% na.omit(), 
+  family = mgcv::nb(link = "log")
+  )
+
+M2 <- gam(
+  hSeals ~ hSeals_prev_avg + anchovy_BRT_prev_avg + 
+           jackMackerel_BRT_prev_avg + sardine_BRT_prev_avg +
+           marketSquid_BRT_prev_avg + s(julian, bs = "cc", k = 20),
+  data = ModelDataAnnual %>% filter(as.numeric(Year) < 18) %>% na.omit(), 
+  family = mgcv::nb(link = "log")
+  )
+
+M3 <- gam(
+  hSeals ~ hSeals_prev_avg + anchovy_BRT_prev_avg + 
+           PacificMackerel_BRT_prev_avg + sardine_BRT_prev_avg +
+           marketSquid_BRT_prev_avg + s(julian, bs = "cc", k = 20),
+  data = ModelDataAnnual %>% filter(as.numeric(Year) < 18) %>% na.omit(), 
+  family = mgcv::nb(link = "log")
+  )
+
+M4 <- gam(
+  hSeals ~ hSeals_prev_avg + anchovy_BRT_prev_avg + sardine_BRT_prev_avg +
+           marketSquid_BRT_prev_avg + s(julian, bs = "cc", k = 20),
+  data = ModelDataAnnual %>% filter(as.numeric(Year) < 18) %>% na.omit(), 
+  family = mgcv::nb(link = "log")
+  )
+
+M5 <- gam(
+  hSeals ~anchovy_BRT_prev_avg + 
+           jackMackerel_BRT_prev_avg + sardine_BRT_prev_avg +
+           marketSquid_BRT_prev_avg + s(julian, bs = "cc", k = 20),
+  data = ModelDataAnnual %>% filter(as.numeric(Year) < 18) %>% na.omit(), 
+  family = mgcv::nb(link = "log")
+  )
+
+models <- list(M1, M2, M3, M4, M5)
+
+aic_values <- sapply(models, AIC)
+
+model_names <- c("Model 1", "Model 2", "Model 3", "Model 4", "Model 5")
+model_vars <- c("LagSeals, LagAnchovy, LagPacificMackerel, LagJackMackerel, LagSardine, LagMarketSquid",
+                 "LagSeals, LagAnchovy, LagJackMackerel, LagSardine, LagMarketSquid",
+                 "LagSeals, LagAnchovy, LagPacificMackerel, LagSardine, LagMarketSquid",
+                 "LagSeals, LagAnchovy, LagSardine, LagMarketSquid",
+                 "LagAnchovy, LagJackMackerel, LagSardine, LagMarketSquid")
+AIC_df <- data.frame(Model = model_names, Covariates = model_vars, AIC = aic_values)
+
+# Viewing the data frame
+print(AIC_df)
+
+AIC_Table <- ggtexttable(AIC_df, 
+                       rows = NULL,
+                       vp = NULL)
+
+# Save the ggplot table as an image
+ggsave("AIC_Table.jpeg", AIC_Table, width = 10, height = 3)
+
+#M2 wins based on lower AIC, and a VIF below the 10.0 threshold. M1 is elimiated on the rationale of pulling Pacific Mackerel out based on the CCM
+concurvity(M2)
+gam.check(M2)
+
+#Training the Model with data prior to 2018
+
+AnnualFishSDM_NegBin_MBRT_Lagged <- M2
+summary(AnnualFishSDM_NegBin_MBRT_Lagged)
+gam.check(AnnualFishSDM_NegBin_MBRT_Lagged)
+
+#Model Validation tests
+summary(AnnualFishSDM_NegBin_MBRT_Lagged)
+car::vif(AnnualFishSDM_NegBin_MBRT_Lagged)
+concurvity(AnnualFishSDM_NegBin_MBRT_Lagged)
+gam.check(AnnualFishSDM_NegBin_MBRT_Lagged)
+
+#Model Validation Plots
+save_plot_as_jpeg <- function(plot_function, filename) {
+  jpeg(filename)
+  plot_function
+  dev.off()
+}
+
+
+# QQ Plot of Residuals
+save_plot_as_jpeg(qq.gam(AnnualFishSDM_NegBin_MBRT_Lagged, rep = 0, pch = 20), "qq_plot_residuals.jpeg")
+
+# Histogram of Residuals
+save_plot_as_jpeg(hist(resid(AnnualFishSDM_NegBin_MBRT_Lagged)), "histogram_residuals.jpeg")
+
+#Response vs fitted
+jpeg("response_vs_fitted_values.jpeg")
+fitted_values <- fitted(AnnualFishSDM_NegBin_MBRT_Lagged)
+observed_responses <- AnnualFishSDM_NegBin_MBRT_Lagged$y
+plot(fitted_values, observed_responses, ylab = "Observed Responses", xlab = "Fitted Values", main = "Response vs. Fitted Values", pch = 20)
+abline(0, 1, col = "red")
+dev.off()
+
+#Residuals vs Linear Predictors
+residuals <- residuals(AnnualFishSDM_NegBin_MBRT_Lagged)
+linear_predictors <- predict(AnnualFishSDM_NegBin_MBRT_Lagged, type = "link")
+
+jpeg("residuals_vs_linear_predictors.jpeg")
+
+plot(linear_predictors, residuals, xlab = "Linear Predictors", ylab = "Residuals", main = "Residuals vs. Linear Predictors", pch = 20)
+abline(h = 0, col = "red")  # Adds a horizontal line at y=0
+
+dev.off()
+
+
+jpeg("smooth_gam_plot.jpeg")
+
+plot(AnnualFishSDM_NegBin_MBRT_Lagged)
+dev.off()
+
+#T-testing
+
+ModelDataAnnual_Lag <- subset(ModelDataAnnual, select = -c(julian,Year))
+ModelDataAnnual_Lag$julian <- vapply(ModelDataAnnual_Lag$Date, \(x) julian(x, origin = as.Date(paste0(lubridate::year(x), "-01-01"))), numeric(1))
+ModelDataAnnual_Lag$Year <- format(as.Date(ModelDataAnnual_Lag$Date, format="%d/%m/%Y"),"%y")
+
+ModelDataAnnual_Lag$seals_fit <- predict(AnnualFishSDM_NegBin_MBRT_Lagged, newdata = ModelDataAnnual_Lag, type = "response")
+ModelDataAnnual_Lag$seals_log_se <- predict(AnnualFishSDM_NegBin_MBRT_Lagged, newdata = ModelDataAnnual_Lag, se.fit = TRUE)$se.fit
+
+#Creating test data to run the t-test on the years 2022 and 2023
+test_data_annual_Lag <- ModelDataAnnual_Lag %>% filter(as.numeric(Year) >= 22) 
+
+Annual_22_23 <- t.test(test_data_annual_Lag$hSeals, test_data_annual_Lag$seals_fit, paired=TRUE)
+
+#Same for pre-roadwork
+test_data_annual_Lag_1821 <- ModelDataAnnual_Lag %>% filter(as.numeric(Year) %in% 18:21) %>% na.omit()
+
+Annual_18_21 <- t.test(test_data_annual_Lag_1821$hSeals, test_data_annual_Lag_1821$seals_fit, paired=TRUE)
+
+Annual_p_values <- c(Annual_22_23$p.value, Annual_18_21$p.value)
+
+p.adjust(Annual_p_values, method = "BH")
+
+
+ModelDataAnnual_Lag %>% 
+  #dplyr::filter(as.numeric(Year) >= 22) %>% 
+  #dplyr::filter(as.numeric(Year) <= 18) %>%
+  ggplot(aes(Date)) + 
+  #geom_ribbon(aes(ymin = exp(log(seals_fit) - seals_log_se), ymax = exp(log(seals_fit) + seals_log_se)), alpha = 0.4) + 
+  geom_line(aes(y = hSeals, color = "true")) + 
+  geom_line(aes(y = seals_fit, color = "fitted")) +
+  theme(axis.text = element_text(size = 16), 
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 18))
+
+#Figure generation
+
+WholePlot <- ModelDataAnnual_Lag %>%
+  dplyr::mutate(year_group = ifelse(as.numeric(Year) < 18, "Training", "Test")) %>%
+  #dplyr::filter(as.numeric(Year) >= 22) %>% 
+  #dplyr::filter(as.numeric(Year) <= 18) %>%
+  ggplot(aes(Date)) + 
+  #geom_ribbon(aes(ymin = exp(log(seals_fit) - seals_log_se), ymax = exp(log(seals_fit) +    seals_log_se)), alpha = 0.4) +
+  geom_line(aes(y = hSeals, color = year_group)) + 
+  geom_line(aes(y = seals_fit, color = "Model"), size = 1.5) +
+  scale_color_manual(values = c("Training" = "darkgrey", "Test" = "red", "Model" = "blue")) +
+  theme(axis.text = element_text(size = 16), 
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 0),
+        panel.background = element_rect(fill = "white")) +
+  ylab("Seals Hauled Out At HMS") +
+  ggtitle("Modeled and Observed Abundances of Harbor Seals at Study Site")
+
+ggsave("WholePlot.jpg", plot = WholePlot, device = "jpg", dpi = 300, width = 12, height = 6)
+
+WholePlot <- ModelDataAnnual_Lag %>%
+  dplyr::mutate(year_group = ifelse(as.numeric(Year) < 18, "Training", "Test")) %>%
+  #dplyr::filter(as.numeric(Year) >= 22) %>% 
+  #dplyr::filter(as.numeric(Year) <= 18) %>%
+  ggplot(aes(Date)) + 
+  #geom_ribbon(aes(ymin = exp(log(seals_fit) - seals_log_se), ymax = exp(log(seals_fit) +    seals_log_se)), alpha = 0.4) +
+  geom_line(aes(y = hSeals, color = year_group)) + 
+  geom_line(aes(y = seals_fit, color = "Model"), size = 1.5) +
+  scale_color_manual(values = c("Training" = "darkgrey", "Test" = "red", "Model" = "blue")) +
+  theme(axis.text = element_text(size = 16), 
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 0),
+        panel.background = element_rect(fill = "white")) +
+  ylab("Seals Hauled Out At HMS") +
+  ggtitle("Modeled and Observed Abundances of Harbor Seals at Study Site")
+
+ggsave("WholePlot.jpg", plot = WholePlot, device = "jpg", dpi = 300, width = 12, height = 6)
+
+OnlyTrainPlot <- ModelDataAnnual_Lag %>%
+  dplyr::mutate(year_group = ifelse(as.numeric(Year) < 18, "Training", "Test")) %>%
+  #dplyr::filter(as.numeric(Year) >= 22) %>% 
+  #dplyr::filter(as.numeric(Year) <= 18) %>%
+  ggplot(aes(Date)) + 
+  #geom_ribbon(aes(ymin = exp(log(seals_fit) - seals_log_se), ymax = exp(log(seals_fit) +    seals_log_se)), alpha = 0.4) +
+  geom_line(aes(y = hSeals, color = year_group)) + 
+  #geom_line(aes(y = seals_fit, color = "Model"), size = 1.5) +
+  scale_color_manual(values = c("Training" = "darkgrey", "Test" = "white", "Model" = "blue")) +
+  theme(axis.text = element_text(size = 16), 
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 0),
+        panel.background = element_rect(fill = "white")) +
+  ylab("Seals Hauled Out At HMS")
+
+ggsave("OnlyTrainPlot.jpg", plot = OnlyTrainPlot, device = "jpg", dpi = 300, width = 12, height = 6)
+
+FitTrainPlot <- ModelDataAnnual_Lag %>%
+  dplyr::mutate(year_group = ifelse(as.numeric(Year) < 18, "Training", "Test")) %>%
+  #dplyr::filter(as.numeric(Year) >= 22) %>% 
+  #dplyr::filter(as.numeric(Year) <= 18) %>%
+  ggplot(aes(Date)) + 
+  #geom_ribbon(aes(ymin = exp(log(seals_fit) - seals_log_se), ymax = exp(log(seals_fit) +    seals_log_se)), alpha = 0.4) +
+  geom_line(aes(y = hSeals, color = year_group)) + 
+  geom_line(aes(y = seals_fit, color = "Model"), size = 1.5) +
+  scale_color_manual(values = c("Training" = "darkgrey", "Test" = "white", "Model" = "blue")) +
+  theme(axis.text = element_text(size = 16), 
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 0),
+        panel.background = element_rect(fill = "white")) +
+  ylab("Seals Hauled Out At HMS")
+
+ggsave("FitTrainPlot.jpg", plot = FitTrainPlot, device = "jpg", dpi = 300, width = 12, height = 6)
+
+FitTestPlot <- ModelDataAnnual_Lag %>%
+  dplyr::mutate(year_group = ifelse(as.numeric(Year) < 18, "Training", "Test")) %>%
+  dplyr::filter(as.numeric(Year) >= 18) %>% 
+  #dplyr::filter(as.numeric(Year) <= 18) %>%
+  ggplot(aes(Date)) + 
+  #geom_ribbon(aes(ymin = exp(log(seals_fit) - seals_log_se), ymax = exp(log(seals_fit) +    seals_log_se)), alpha = 0.4) +
+  geom_line(aes(y = hSeals, color = year_group)) + 
+  geom_line(aes(y = seals_fit, color = "Model"), size = 1.5) +
+  scale_color_manual(values = c("Training" = "darkgrey", "Test" = "red", "Model" = "blue")) +
+  theme(axis.text = element_text(size = 16), 
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 0),
+        panel.background = element_rect(fill = "white")) +
+  ylab("Seals Hauled Out At HMS")
+
+ggsave("FitTestPlot.jpg", plot = FitTestPlot, device = "jpg", dpi = 300, width = 12, height = 6)
+
+FitTestPlot_22_23 <- ModelDataAnnual_Lag %>%
+  dplyr::mutate(year_group = ifelse(as.numeric(Year) < 18, "Training", "Test")) %>%
+  #dplyr::filter(as.numeric(Year) >= 18) %>% 
+  dplyr::filter(as.numeric(Year) >= 22) %>%
+  ggplot(aes(Date)) + 
+  #geom_ribbon(aes(ymin = exp(log(seals_fit) - seals_log_se), ymax = exp(log(seals_fit) +    seals_log_se)), alpha = 0.4) +
+  geom_line(aes(y = hSeals, color = year_group)) + 
+  geom_line(aes(y = seals_fit, color = "Model"), size = 1.5) +
+  scale_color_manual(values = c("Training" = "darkgrey", "Test" = "red", "Model" = "blue")) +
+  theme(axis.text = element_text(size = 16), 
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 0),
+        panel.background = element_rect(fill = "white")) +
+  ylab("Seals Hauled Out At HMS")
+
+ggsave("FitTestPlot_22_23.jpg", plot = FitTestPlot_22_23, device = "jpg", dpi = 300, width = 12, height = 6)
+
+
+FitTestPlot_22_23_smooth <- ModelDataAnnual_Lag %>%
+  dplyr::mutate(
+    year_group = ifelse(as.numeric(Year) < 18, "Train", "Test"), 
+    MonthYear = paste(lubridate::year(Date), lubridate::month(Date), sep.= "-")
+  ) %>%
+  # Calculate the monthly mean
+  group_by(MonthYear) %>%
+  mutate(MonthMean = mean(as.numeric(hSeals), na.rm = TRUE), 
+         MonthMeanFit = mean(as.numeric(seals_fit), na.rm = TRUE)) %>%
+  ungroup() %>%
+  #dplyr::filter(as.numeric(Year) >= 18) %>% 
+  dplyr::filter(as.numeric(Year) >= 22) %>%
+  ggplot(aes(Date)) + 
+  #geom_ribbon(aes(ymin = exp(log(seals_fit) - seals_log_se), ymax = exp(log(seals_fit) +    seals_log_se)), alpha = 0.4) +
+  geom_smooth(aes(y = hSeals, color = year_group), method="gam") +
+  geom_point(aes(y = MonthMean, color = "MonMean")) +
+  geom_point(aes(y = MonthMeanFit, color = "MonMeanFit")) +
+  #geom_line(aes(y = hSeals, color = "white")) +
+  geom_line(aes(y = seals_fit, color = "Model"), size = 1.5) +
+  scale_color_manual(values = c("Train" = "darkgrey", "Test" = "red", "Model" = "blue", "MonMean" = "green")) +
+  theme(axis.text = element_text(size = 16), 
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 18),
+        panel.background = element_rect(fill = "white")) # Set background to light grey)
+
+ggsave("FitTestPlot_22_23_smooth.jpg", plot = FitTestPlot_22_23_smooth, device = "jpg", dpi = 300, width = 12, height = 6)
+
+month_data <- ModelDataAnnual_Lag %>%
+  dplyr::mutate(
+    year_group = ifelse(as.numeric(Year) < 18, "Train", "Test"), 
+    MonthYear = paste(lubridate::year(Date), lubridate::month(Date), sep.= "-"), 
+    Month = factor(lubridate::month(Date, label = TRUE), levels = month.abb), 
+    Year = lubridate::year(Date),
+  ) %>%
+  # Calculate the monthly mean
+  group_by(Year, Month) %>%
+  dplyr::summarize(MonthMean = mean(as.numeric(hSeals), na.rm = TRUE), 
+         MonthMeanFit = mean(as.numeric(seals_fit), na.rm = TRUE)) %>%
+  ungroup() %>%
+  dplyr::mutate(
+    difference = MonthMeanFit - MonthMean)
+
+test_month_data <- month_data %>% dplyr::filter(as.numeric(Year) >= 2022)
+
+t.test(test_month_data$MonthMean, test_month_data$MonthMeanFit, paired=TRUE)
+
+DifferencePlot <- month_data %>% 
+  #dplyr::filter(as.numeric(Year) >= 2018) %>%
+  ggplot(aes(Month)) + 
+  geom_point(aes(y = difference, color = "Difference"), size = 2) +
+  facet_grid(~Year, space = "free_x", scales = "free_x", switch = "x") + 
+  scale_color_manual(values = c("Difference" = "darkgrey")) +
+  theme_minimal() + 
+  theme(axis.text = element_text(size = 16), 
+        #axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 0),
+        panel.spacing = unit(0, "lines"), 
+        strip.text = element_text(size = 14), 
+        axis.title.x = element_blank(),
+        strip.placement = "outside") +
+  ylab("Modeled Minus Actual")
+
+MonthPlot <- month_data %>% 
+  dplyr::filter(as.numeric(Year) >= 2022) %>%
+  ggplot(aes(Month)) + 
+  geom_segment(aes(xend = Month, y = MonthMean, yend = MonthMeanFit)) + 
+  geom_point(aes(y = MonthMean, color = "Actual"), size = 8) +
+  geom_point(aes(y = MonthMeanFit, color = "Prediction"), size = 8) +
+  facet_grid(~Year, space = "free_x", scales = "free_x", switch = "x") + 
+  scale_color_manual(values = c("Train" = "darkgrey", "Test" = "red", "Prediction" = "blue", "Actual" = "red")) +
+  theme_minimal() + 
+  theme(axis.text = element_text(size = 16), 
+        #axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 0),
+        panel.spacing = unit(0, "lines"), 
+        strip.text = element_text(size = 14), 
+        axis.title.x = element_blank(),
+        strip.placement = "outside") +
+  ylab("Monthly Mean Seals at HMS") +
+  ggtitle("Monthly Averages of Modeled and Observed Abundances of Harbor Seals at Study Site")
+
+ggsave("MonthPlot.jpg", plot = MonthPlot, device = "jpg", dpi = 300, width = 12, height = 6)
+
+Observed <- ModelDataAnnual_Lag %>%
+  #dplyr::mutate(year_group = ifelse(as.numeric(Year) < 18, "Train", "Test")) %>%
+  #dplyr::filter(as.numeric(Year) >= 22) %>% 
+  #dplyr::filter(as.numeric(Year) <= 18) %>%
+  ggplot(aes(Date)) + 
+  #geom_ribbon(aes(ymin = exp(log(seals_fit) - seals_log_se), ymax = exp(log(seals_fit) +    seals_log_se)), alpha = 0.4) +
+  geom_line(aes(y = hSeals, color = "Observation")) + 
+  #geom_line(aes(y = seals_fit, color = "Model"), size = 1.5) +
+  scale_color_manual(values = c("Observation" = "blue", "Test" = "red", "Model" = "blue")) +
+  theme(axis.text = element_text(size = 16), 
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 0),
+        panel.background = element_rect(fill = "white")) +
+  ylab("Seals Hauled Out At HMS")
+
+ggsave("Observed.jpg", plot = Observed, device = "jpg", dpi = 300, width = 12, height = 6)
+
+#The t test seems to indicate that when you factor in the annual lag, the harbor seal population was actually lower than the model would have predicted in 2022
+
+
+FishPlot <- ModelDataAnnual_Lag %>%
+  dplyr::mutate(year_group = ifelse(as.numeric(Year) < 18, "Training", "Test")) %>%
+  #dplyr::filter(as.numeric(Year) >= 22) %>% 
+  #dplyr::filter(as.numeric(Year) <= 18) %>%
+  ggplot(aes(Date)) + 
+  #geom_ribbon(aes(ymin = exp(log(seals_fit) - seals_log_se), ymax = exp(log(seals_fit) +    seals_log_se)), alpha = 0.4) +
+  geom_smooth(aes(y = anchovy_BRT, color = "Anchovy")) + 
+  geom_smooth(aes(y = sardine_BRT, color = "Sardine")) +
+  geom_smooth(aes(y = jackMackerel_BRT, color = "Jack Mackerel")) +
+  geom_smooth(aes(y = marketSquid_BRT, color = "Market Squid")) +
+  scale_color_manual(values = c("Anchovy" = "darkgrey", "Sardine" = "red", "Jack Mackerel" = "blue", "Market Squid" = "black")) +
+  theme(axis.text = element_text(size = 16), 
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 0),
+        panel.background = element_rect(fill = "white")) +
+  ylab("Probability of Occurrence") +
+  ggtitle("Modeled Fish Probability of Occurrence (Loess Smoothed, 95% CI)")
+
+ggsave("FishPlot.jpg", plot = FishPlot, device = "jpg", dpi = 300, width = 12, height = 6)
+
+
+WestBeachSmoothPlotLegend <- ggplot(data=WestBeachClean, aes(x=Julian, y=hSeals, group=Year, color=Year)) +
+    geom_smooth() +
+    scale_color_viridis(discrete = FALSE) +
+    ggtitle("West Beach Harbor Seal Counts (Loess with .95 CI)") +
+    theme() +
+    ylab("Seals Hauled Out") +
+    xlab("Julian Date")+
+    theme(legend.position = "right") +
+    theme(axis.text=element_text(size=6)) +
+    scale_x_continuous(breaks=seq(0,366,by=25))
+
+ggsave(WestBeachSmoothPlotLegend, filename = "SmoothAllYears_hSealsLegend.jpeg", 
+       width = 11, height = 8, units = "in") 
+
+coef_summary <- summary(AnnualFishSDM_NegBin_MBRT_Lagged)$p.table
+
+# Convert to data frame for ggplot
+coef_df <- as.data.frame(coef_summary)
+coef_df$term <- rownames(coef_df)
+coef_df$Std.Error <- coef_df$`Std. Error`
+coef_df$Significance <-  ifelse(coef_df$`Pr(>|z|)` < 0.05, "Significant", "Non-Significant")
+coef_df <- dplyr::filter(coef_df, term != "(Intercept)")
+
+# Forest plot
+custom_labels <- c("Anchovy", "Harbor Seals", "Jack Mackerel", "Market Squid", "Sardines")
+ForestPlot <- ggplot(coef_df, aes(y = term, x = Estimate, xmin = Estimate - 1.96 * as.numeric(`Std. Error`), xmax = Estimate + 1.96 * as.numeric(`Std. Error`))) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_errorbarh(height = 0.2, color = "black") +
+  geom_point(aes(color = Significance), size = 4) +  # Moved color aesthetic here
+  scale_color_manual(values = c("Significant" = "red", "Non-Significant" = "blue")) +
+  xlab("Coefficient Estimate (95% CI)") +
+  ylab("1-yr Time-Lagged Terms") +
+  scale_y_discrete(labels = custom_labels) +
+  theme_minimal() +
+  ggtitle("GAM Estimate Results")
+
+ggsave(ForestPlot, filename = "ForestPlot.jpg", 
+       width = 8, height = 6, units = "in") 
+```
+
+```{R}
+#365-day rolling average
+
+RollingAverage <- ModelDataAnnual_Lag
+
+RollingAverage$Anchovy <- rollmean(RollingAverage$anchovy_BRT, 365, mean, na.rm = TRUE, fill = NA, align = 'right')
+
+RollingAverage$Jack <- rollmean(RollingAverage$jackMackerel_BRT, 365, mean, na.rm = TRUE, fill = NA, align = 'right')
+
+RollingAverage$Pac <- rollmean(RollingAverage$PacificMackerel_BRT, 365, mean, na.rm = TRUE, fill = NA, align = 'right')
+
+RollingAverage$Sard <- rollmean(RollingAverage$sardine_BRT, 365, mean, na.rm = TRUE, fill = NA, align = 'right')
+
+RollingAverage$Squid <- rollmean(RollingAverage$marketSquid_BRT, 365, mean, na.rm = TRUE, fill = NA, align = 'right')
+
+RollingAverage$Seals <- rollmean(RollingAverage$hSeals, 365, mean, na.rm = TRUE, fill = NA, align = 'right')
+
+RollingCorr <- as.data.frame(
+  RollingAverage[c(7,33,34,35,36,37,38)]
+) %>% drop_na()
+
+str(RollingCorr)
+
+correlation_rolling <- cor(RollingCorr, use = "complete.obs")
+
+correlation_rolling_long <- melt(correlation_rolling)
+
+Rolling_Corr_Plot <- ggplot(correlation_rolling_long, aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  geom_text(aes(label = sprintf("%.2f", value)), vjust = 1) + 
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Pearson\nCorrelation") +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "", y = "")
+
+ggsave("Rolling_Corr_Plot.jpeg", Rolling_Corr_Plot, width = 10, height = 8)
+
+
+R1 <- gam(
+  hSeals ~ Seals + Anchovy + Jack + Pac + Sard + Squid + s(julian, bs = "cc", k = 20),
+  data = RollingAverage %>% filter(as.numeric(Year) < 18) %>% na.omit(), 
+  family = mgcv::nb(link = "log")
+  )
+
+R2 <- gam(
+  hSeals ~ Seals + Anchovy + Jack + Sard + Squid + s(julian, bs = "cc", k = 20),
+  data = RollingAverage %>% filter(as.numeric(Year) < 18) %>% na.omit(), 
+  family = mgcv::nb(link = "log")
+  )
+
+R3 <- gam(
+  hSeals ~ Seals + Anchovy + Pac + Sard + Squid + s(julian, bs = "cc", k = 20),
+  data = RollingAverage %>% filter(as.numeric(Year) < 18) %>% na.omit(), 
+  family = mgcv::nb(link = "log")
+  )
+
+R4 <- gam(
+  hSeals ~ Seals + Anchovy + Sard + Squid + s(julian, bs = "cc", k = 20),
+  data = RollingAverage %>% filter(as.numeric(Year) < 18) %>% na.omit(), 
+  family = mgcv::nb(link = "log")
+  )
+
+R5 <- gam(
+  hSeals ~ Anchovy + Jack + Sard + Squid + s(julian, bs = "cc", k = 20),
+  data = RollingAverage %>% filter(as.numeric(Year) < 18) %>% na.omit(), 
+  family = mgcv::nb(link = "log")
+  )
+
+R6 <- gam(
+  hSeals ~ Seals + Pac + Sard + Squid + s(julian, bs = "cc", k = 20),
+  data = RollingAverage %>% filter(as.numeric(Year) < 18) %>% na.omit(), 
+  family = mgcv::nb(link = "log")
+  )
+
+R7 <- gam(
+  hSeals ~ Anchovy + Pac + Sard + Squid + s(julian, bs = "cc", k = 20),
+  data = RollingAverage %>% filter(as.numeric(Year) < 18) %>% na.omit(), 
+  family = mgcv::nb(link = "log")
+  )
+
+##Initial model selection indicated that R3 was the winning model based on AIC - however R3 had a high VIF (38.3) -- cross-correlation indicated that Seals and Anchovies showed a high correlation, so anchovies were removed from the model and the result was R6, which has a lower VIF (7.9). R7 includes Anchovy and removes seals, but has a higher AIC and VIF than R6, so R6 is the preferred model
+
+rolling_models <- list(R1, R2, R3, R4, R5, R6, R7)
+
+aic_values <- sapply(rolling_models, AIC)
+
+rol_model_names <- c("Model 1", "Model 2", "Model 3", "Model 4", "Model 5", "Model 6", "Model 7")
+rol_model_vars <- c("Seals + Anchovy + JackMackeral + PacificMackerel + Sardines + MarketSquid",
+                 "Seals + Anchovy + JackMackeral + Sardines + MarketSquid",
+                 "Seals + Anchovy + PacificMackerel + Sardines + MarketSquid",
+                 "Seals + Anchovy + Sardines + MarketSquid",
+                 "Anchovy + JackMackeral + Sardines + MarketSquid",
+                 "Seals + PacificMackerel + Sardines + MarketSquid",
+                 "Anchovy + PacificMackerel + Sardines + MarketSquid")
+Rol_AIC_df <- data.frame(Model = rol_model_names, Covariates = rol_model_vars, AIC = aic_values)
+
+Rol_AIC_Table <- ggtexttable(Rol_AIC_df, 
+                       rows = NULL,
+                       vp = NULL)
+
+# Save the ggplot table as an image
+ggsave("Rol_AIC_Table.jpeg", Rol_AIC_Table, width = 10, height = 3)
+
+car::vif(R6)
+
+#R6 is the winner - validation plots below
+
+
+#Rolling Mean model validation plots
+
+#Model Validation tests
+summary(R6)
+car::vif(R6)
+concurvity(R6)
+gam.check(R6)
+
+#Model Validation Plots
+save_plot_as_jpeg <- function(plot_function, filename) {
+  jpeg(filename)
+  plot_function
+  dev.off()
+}
+
+
+# QQ Plot of Residuals
+save_plot_as_jpeg(qq.gam(R6, rep = 0, pch = 20), "Rolling_qq_plot_residuals.jpeg")
+
+# Histogram of Residuals
+save_plot_as_jpeg(hist(resid(R6)), "Rolling_histogram_residuals.jpeg")
+
+#Response vs fitted
+jpeg("Rolling_response_vs_fitted_values.jpeg")
+rol_fitted_values <- fitted(R6)
+rol_observed_responses <- R6$y
+plot(rol_fitted_values, rol_observed_responses, ylab = "Observed Responses", xlab = "Fitted Values", main = "Response vs. Fitted Values", pch = 20)
+abline(0, 1, col = "red")
+dev.off()
+
+#Residuals vs Linear Predictors
+rol_residuals <- residuals(R6)
+rol_linear_predictors <- predict(R6, type = "link")
+
+jpeg("Rolling_residuals_vs_linear_predictors.jpeg")
+
+plot(rol_linear_predictors, rol_residuals, xlab = "Linear Predictors", ylab = "Residuals", main = "Residuals vs. Linear Predictors", pch = 20)
+abline(h = 0, col = "red")  # Adds a horizontal line at y=0
+
+dev.off()
+
+
+jpeg("Rolling_smooth_gam_plot.jpeg")
+
+plot(R6)
+dev.off()
+
+
+#Applying R6 as the final model
+
+Rolling_Test <- R6
+summary(Rolling_Test)
+gam.check(Rolling_Test)
+concurvity(Rolling_Test)
+
+RollingAverage <- subset(RollingAverage, select = -c(julian,Year))
+RollingAverage$julian <- vapply(RollingAverage$Date, \(x) julian(x, origin = as.Date(paste0(lubridate::year(x), "-01-01"))), numeric(1))
+RollingAverage$Year <- format(as.Date(RollingAverage$Date, format="%d/%m/%Y"),"%y")
+
+RollingAverage$seals_fit <- predict(Rolling_Test, newdata = RollingAverage, type = "response")
+RollingAverage$seals_log_se <- predict(Rolling_Test, newdata = RollingAverage, se.fit = TRUE)$se.fit
+
+#Creating test data to run the t-test on the years 2022 and 2023
+test_data_annual_Rolling <- RollingAverage %>% filter(as.numeric(Year) >= 22) 
+
+Rolling_22_23 <- t.test(test_data_annual_Rolling$hSeals, test_data_annual_Rolling$seals_fit, paired=TRUE)
+
+#Creating test data to run a t-test on 2018-2021 as a comparison
+test_data_annual_Rolling_1821 <- RollingAverage %>% filter(as.numeric(Year) %in% 18:21) %>% na.omit()
+
+Rolling_18_21 <- t.test(test_data_annual_Rolling_1821$hSeals, test_data_annual_Rolling_1821$seals_fit, paired=TRUE)
+
+
+Rolling_p_values <- c(Rolling_22_23$p.value, Rolling_18_21$p.value)
+
+p.adjust(Rolling_p_values, method = "BH")
+
+RollingAverage %>% 
+  #dplyr::filter(as.numeric(Year) >= 22) %>% 
+  #dplyr::filter(as.numeric(Year) <= 18) %>%
+  ggplot(aes(Date)) + 
+  #geom_ribbon(aes(ymin = exp(log(seals_fit) - seals_log_se), ymax = exp(log(seals_fit) + seals_log_se)), alpha = 0.4) + 
+  geom_line(aes(y = hSeals, color = "true")) + 
+  geom_line(aes(y = seals_fit, color = "fitted")) +
+  theme(axis.text = element_text(size = 16), 
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 18))
+
+
+month_data_Rolling <- RollingAverage %>%
+  dplyr::mutate(
+    year_group = ifelse(as.numeric(Year) < 18, "Train", "Test"), 
+    MonthYear = paste(lubridate::year(Date), lubridate::month(Date), sep.= "-"), 
+    Month = factor(lubridate::month(Date, label = TRUE), levels = month.abb), 
+    Year = lubridate::year(Date),
+  ) %>%
+  # Calculate the monthly mean
+  group_by(Year, Month) %>%
+  dplyr::summarize(MonthMean = mean(as.numeric(hSeals), na.rm = TRUE), 
+         MonthMeanFit = mean(as.numeric(seals_fit), na.rm = TRUE)) %>%
+  ungroup() %>%
+  dplyr::mutate(
+    difference = MonthMeanFit - MonthMean)
+
+test_month_data_rolling <- month_data_Rolling %>% dplyr::filter(as.numeric(Year) >= 2022)
+
+t.test(test_month_data_rolling$MonthMean, test_month_data_rolling$MonthMeanFit, paired=TRUE)
+
+
+#Figure generation
+
+MonthPlot_Rolling <- month_data_Rolling %>% 
+  dplyr::filter(as.numeric(Year) >= 2022) %>%
+  ggplot(aes(Month)) + 
+  geom_segment(aes(xend = Month, y = MonthMean, yend = MonthMeanFit)) + 
+  geom_point(aes(y = MonthMean, color = "Actual"), size = 8) +
+  geom_point(aes(y = MonthMeanFit, color = "Prediction"), size = 8) +
+  facet_grid(~Year, space = "free_x", scales = "free_x", switch = "x") + 
+  scale_color_manual(values = c("Train" = "darkgrey", "Test" = "red", "Prediction" = "blue", "Actual" = "red")) +
+  theme_minimal() + 
+  theme(axis.text = element_text(size = 16), 
+        #axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 0),
+        panel.spacing = unit(0, "lines"), 
+        strip.text = element_text(size = 14), 
+        axis.title.x = element_blank(),
+        strip.placement = "outside") +
+  ylab("Monthly Mean Seals at HMS") +
+  ggtitle("Monthly Averages of Modeled and Observed Abundances of Harbor Seals at Study Site")
+
+ggsave("MonthPlot_Rolling.jpg", plot = MonthPlot_Rolling, device = "jpg", dpi = 300, width = 12, height = 6)
+
+
+
+
+RollingWholePlot <- RollingAverage %>%
+  dplyr::mutate(year_group = ifelse(as.numeric(Year) < 18, "Training", "Test")) %>%
+  #dplyr::filter(as.numeric(Year) >= 22) %>% 
+  #dplyr::filter(as.numeric(Year) <= 18) %>%
+  ggplot(aes(Date)) + 
+  #geom_ribbon(aes(ymin = exp(log(seals_fit) - seals_log_se), ymax = exp(log(seals_fit) +    seals_log_se)), alpha = 0.4) +
+  geom_line(aes(y = hSeals, color = year_group)) + 
+  geom_line(aes(y = seals_fit, color = "Model"), size = 1.5) +
+  scale_color_manual(values = c("Training" = "darkgrey", "Test" = "red", "Model" = "blue")) +
+  theme(axis.text = element_text(size = 16), 
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 0),
+        panel.background = element_rect(fill = "white")) +
+  ylab("Seals Hauled Out At HMS") +
+  ggtitle("Modeled and Observed Abundances of Harbor Seals at Study Site")
+
+ggsave("RollingWholePlot.jpg", plot = RollingWholePlot, device = "jpg", dpi = 300, width = 12, height = 6)
+
+RollingWholePlot <- RollingAverage %>%
+  dplyr::mutate(year_group = ifelse(as.numeric(Year) < 18, "Training", "Test")) %>%
+  #dplyr::filter(as.numeric(Year) >= 22) %>% 
+  #dplyr::filter(as.numeric(Year) <= 18) %>%
+  ggplot(aes(Date)) + 
+  #geom_ribbon(aes(ymin = exp(log(seals_fit) - seals_log_se), ymax = exp(log(seals_fit) +    seals_log_se)), alpha = 0.4) +
+  geom_line(aes(y = hSeals, color = year_group)) + 
+  geom_line(aes(y = seals_fit, color = "Model"), size = 1.5) +
+  scale_color_manual(values = c("Training" = "darkgrey", "Test" = "red", "Model" = "blue")) +
+  theme(axis.text = element_text(size = 16), 
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 0),
+        panel.background = element_rect(fill = "white")) +
+  ylab("Seals Hauled Out At HMS") +
+  ggtitle("Modeled and Observed Abundances of Harbor Seals at Study Site")
+
+ggsave("RollingWholePlot.jpg", plot = RollingWholePlot, device = "jpg", dpi = 300, width = 12, height = 6)
+
+RollingOnlyTrainPlot <- RollingAverage %>%
+  dplyr::mutate(year_group = ifelse(as.numeric(Year) < 18, "Training", "Test")) %>%
+  #dplyr::filter(as.numeric(Year) >= 22) %>% 
+  #dplyr::filter(as.numeric(Year) <= 18) %>%
+  ggplot(aes(Date)) + 
+  #geom_ribbon(aes(ymin = exp(log(seals_fit) - seals_log_se), ymax = exp(log(seals_fit) +    seals_log_se)), alpha = 0.4) +
+  geom_line(aes(y = hSeals, color = year_group)) + 
+  #geom_line(aes(y = seals_fit, color = "Model"), size = 1.5) +
+  scale_color_manual(values = c("Training" = "darkgrey", "Test" = "white", "Model" = "blue")) +
+  theme(axis.text = element_text(size = 16), 
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 0),
+        panel.background = element_rect(fill = "white")) +
+  ylab("Seals Hauled Out At HMS")
+
+ggsave("RollingOnlyTrainPlot.jpg", plot = RollingOnlyTrainPlot, device = "jpg", dpi = 300, width = 12, height = 6)
+
+RollingFitTrainPlot <- RollingAverage %>%
+  dplyr::mutate(year_group = ifelse(as.numeric(Year) < 18, "Training", "Test")) %>%
+  #dplyr::filter(as.numeric(Year) >= 22) %>% 
+  #dplyr::filter(as.numeric(Year) <= 18) %>%
+  ggplot(aes(Date)) + 
+  #geom_ribbon(aes(ymin = exp(log(seals_fit) - seals_log_se), ymax = exp(log(seals_fit) +    seals_log_se)), alpha = 0.4) +
+  geom_line(aes(y = hSeals, color = year_group)) + 
+  geom_line(aes(y = seals_fit, color = "Model"), size = 1.5) +
+  scale_color_manual(values = c("Training" = "darkgrey", "Test" = "white", "Model" = "blue")) +
+  theme(axis.text = element_text(size = 16), 
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 0),
+        panel.background = element_rect(fill = "white")) +
+  ylab("Seals Hauled Out At HMS")
+
+ggsave("RollingFitTrainPlot.jpg", plot = RollingFitTrainPlot, device = "jpg", dpi = 300, width = 12, height = 6)
+
+RollingFitTestPlot <- RollingAverage %>%
+  dplyr::mutate(year_group = ifelse(as.numeric(Year) < 18, "Training", "Test")) %>%
+  dplyr::filter(as.numeric(Year) >= 18) %>% 
+  #dplyr::filter(as.numeric(Year) <= 18) %>%
+  ggplot(aes(Date)) + 
+  #geom_ribbon(aes(ymin = exp(log(seals_fit) - seals_log_se), ymax = exp(log(seals_fit) +    seals_log_se)), alpha = 0.4) +
+  geom_line(aes(y = hSeals, color = year_group)) + 
+  geom_line(aes(y = seals_fit, color = "Model"), size = 1.5) +
+  scale_color_manual(values = c("Training" = "darkgrey", "Test" = "red", "Model" = "blue")) +
+  theme(axis.text = element_text(size = 16), 
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 0),
+        panel.background = element_rect(fill = "white")) +
+  ylab("Seals Hauled Out At HMS")
+
+ggsave("RollingFitTestPlot.jpg", plot = RollingFitTestPlot, device = "jpg", dpi = 300, width = 12, height = 6)
+
+RollingFitTestPlot_22_23 <- RollingAverage %>%
+  dplyr::mutate(year_group = ifelse(as.numeric(Year) < 18, "Training", "Test")) %>%
+  #dplyr::filter(as.numeric(Year) >= 18) %>% 
+  dplyr::filter(as.numeric(Year) >= 22) %>%
+  ggplot(aes(Date)) + 
+  #geom_ribbon(aes(ymin = exp(log(seals_fit) - seals_log_se), ymax = exp(log(seals_fit) +    seals_log_se)), alpha = 0.4) +
+  geom_line(aes(y = hSeals, color = year_group)) + 
+  geom_line(aes(y = seals_fit, color = "Model"), size = 1.5) +
+  scale_color_manual(values = c("Training" = "darkgrey", "Test" = "red", "Model" = "blue")) +
+  theme(axis.text = element_text(size = 16), 
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 0),
+        panel.background = element_rect(fill = "white")) +
+  ylab("Seals Hauled Out At HMS")
+
+ggsave("RollingFitTestPlot_22_23.jpg", plot = RollingFitTestPlot_22_23, device = "jpg", dpi = 300, width = 12, height = 6)
+
+
+RollingFitTestPlot_22_23_smooth <- RollingAverage %>%
+  dplyr::mutate(
+    year_group = ifelse(as.numeric(Year) < 18, "Train", "Test"), 
+    MonthYear = paste(lubridate::year(Date), lubridate::month(Date), sep.= "-")
+  ) %>%
+  # Calculate the monthly mean
+  group_by(MonthYear) %>%
+  mutate(MonthMean = mean(as.numeric(hSeals), na.rm = TRUE), 
+         MonthMeanFit = mean(as.numeric(seals_fit), na.rm = TRUE)) %>%
+  ungroup() %>%
+  #dplyr::filter(as.numeric(Year) >= 18) %>% 
+  dplyr::filter(as.numeric(Year) >= 22) %>%
+  ggplot(aes(Date)) + 
+  #geom_ribbon(aes(ymin = exp(log(seals_fit) - seals_log_se), ymax = exp(log(seals_fit) +    seals_log_se)), alpha = 0.4) +
+  geom_smooth(aes(y = hSeals, color = year_group), method="gam") +
+  geom_point(aes(y = MonthMean, color = "MonMean")) +
+  geom_point(aes(y = MonthMeanFit, color = "MonMeanFit")) +
+  #geom_line(aes(y = hSeals, color = "white")) +
+  geom_line(aes(y = seals_fit, color = "Model"), size = 1.5) +
+  scale_color_manual(values = c("Train" = "darkgrey", "Test" = "red", "Model" = "blue", "MonMean" = "green")) +
+  theme(axis.text = element_text(size = 16), 
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 18),
+        panel.background = element_rect(fill = "white")) # Set background to light grey)
+
+ggsave("RollingFitTestPlot_22_23_smooth.jpg", plot = RollingFitTestPlot_22_23_smooth, device = "jpg", dpi = 300, width = 12, height = 6)
+
+#Generating forest plot
+
+coef_summary <- summary(Rolling_Test)$p.table
+
+# Convert to data frame for ggplot
+coef_df <- as.data.frame(coef_summary)
+coef_df$term <- rownames(coef_df)
+coef_df$Std.Error <- coef_df$`Std. Error`
+coef_df$Significance <-  ifelse(coef_df$`Pr(>|z|)` < 0.05, "Significant", "Non-Significant")
+coef_df <- dplyr::filter(coef_df, term != "(Intercept)")
+
+# Forest plot
+custom_labels <- c("Pacific Mackerel", "Sardines", "Harbor Seals", "Market Squid")
+ForestPlot <- ggplot(coef_df, aes(y = term, x = Estimate, xmin = Estimate - 1.96 * as.numeric(`Std. Error`), xmax = Estimate + 1.96 * as.numeric(`Std. Error`))) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_errorbarh(height = 0.2, color = "black") +
+  geom_point(aes(color = Significance), size = 4) +  # Moved color aesthetic here
+  scale_color_manual(values = c("Significant" = "red", "Non-Significant" = "blue")) +
+  xlab("Coefficient Estimate (95% CI)") +
+  ylab("1-yr Time-Lagged Terms") +
+  scale_y_discrete(labels = custom_labels) +
+  theme_minimal() +
+  ggtitle("GAM Estimate Results")
+
+ggsave(ForestPlot, filename = "ForestPlot.jpg", 
+       width = 8, height = 6, units = "in") 
+
+ModelPlot_AB <- ggarrange(RollingWholePlot, RollingFitTestPlot_22_23, 
+          labels = c("A", "B"), 
+          ncol = 1, nrow = 2)
+
+ggsave(ModelPlot_AB, filename = "ModelPlot_AB.jpg", 
+       width = 12, height = 8, units = "in") 
+
+ModelPlot_ABC <- ggarrange(RollingWholePlot, RollingFitTestPlot, RollingFitTestPlot_22_23, 
+          labels = c("A", "B", "C"), 
+          ncol = 1, nrow = 3)
+
+ggsave(ModelPlot_ABC, filename = "ModelPlot_ABC.jpg", 
+       width = 12, height = 12, units = "in") 
+
+```
+
+```{R}
+#Time Series workflow for the interpolated dataset with no leap years
+#install.packages("xts")                      # Install & load xts package
+library("xts")
+library(zoo)
+library(TSstudio)
+library("TTR")
+library(dplyr)
+
+ModelDataAnnual_Lag_Leap <- subset(ModelDataAnnual_Lag, MonthYear!="02_29")
+
+Seals_ts <- xts(ModelDataAnnual_Lag$hSeals, ModelDataAnnual_Lag$Date)
+
+Seals_ts <- xts_to_ts(Seals_ts)
+
+class(Seals_ts)
+
+ts_plot(Seals_ts)
+
+Seals_Imputed <- na.aggregate(Seals_ts)
+
+#Decomposing 
+
+Seals_ts_Decomposed <- decompose(Seals_Imputed)
+plot(Seals_ts_Decomposed)
+
+jpeg("Decomposed.jpeg")
+
+plot(Seals_ts_Decomposed)
+dev.off()
+
+
+#Subtracting the seasonality
+
+Seals_ts_Adjusted <- Seals_ts - Seals_ts_Decomposed$seasonal - Seals_ts_Decomposed$random
+plot(Seals_ts_Adjusted)
+plot(Seals_ts_Decomposed$trend,
+     main = "Harbor Seal Count Trend")
+
+# Extract the trend component
+Seals_ts_trend <- Seals_ts_Decomposed$trend
+
+time_index <- time(Seals_ts_Decomposed$x)
+
+SealsTrend_df <- data.frame(
+  time = time_index,
+  observed = Seals_ts_Decomposed$x,
+  trend = Seals_ts_Decomposed$trend,
+  seasonal = Seals_ts_Decomposed$seasonal,
+  random = Seals_ts_Decomposed$random
+)
+
+ts_data <- ts(SealsTrend_df, start = c(2003, 250), frequency = 365.25)
+
+# Convert ts time to Date
+start_date <- as.Date("2003-09-07")
+
+# Create a sequence of dates
+dates <- seq(from = start_date, by = "day", length.out = length(ts_data))
+
+nrow_df <- nrow(SealsTrend_df)
+
+if (length(dates) > nrow_df) {
+  dates <- dates[1:nrow_df]
+}
+
+
+SealsTrend_df$Date <- dates
+
+
+TrendPlot <- SealsTrend_df %>%
+  ggplot(aes(Date)) + 
+  geom_line(aes(y = trend, color = "Trend")) + 
+  scale_color_manual(values = c("Trend" = "red")) +
+  theme(axis.text = element_text(size = 16), 
+        axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 0),
+        panel.background = element_rect(fill = "white")) +
+  ylab("Decomposed Trend of Seals Hauled Out At HMS") +
+  ggtitle("Decomposed Trend of Abundances of Harbor Seals at Study Site")
+
+ggsave(TrendPlot, filename = "TrendPlot.jpg", 
+       width = 10, height = 6, units = "in") 
+
+```
+
+```{R}
+#p-values adjusted
+
+
+YearLag_p_values <- c(Annual_22_23$p.value, Annual_18_21$p.value, Rolling_22_23$p.value, Rolling_18_21$p.value)
+
+Rolling_p_values <- c(Rolling_22_23$p.value, Rolling_18_21$p.value)
+
+p_adjust_year_lags <- p.adjust(YearLag_p_values, method = "BH")
+print(p_adjust_year_lags)
+
+p_only_rolling <- p.adjust(Rolling_p_values, method = "BH")
+print(p_only_rolling)
+```
