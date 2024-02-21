@@ -903,11 +903,39 @@ MonthPlot_Rolling <- month_data_Rolling %>%
         strip.text = element_text(size = 14), 
         axis.title.x = element_blank(),
         strip.placement = "outside") +
-  ylab("Monthly Mean Seals at HMS") +
-  ggtitle("Monthly Averages of Modeled and Observed Abundances of Harbor Seals at Study Site")
+  ylab("Monthly Mean Seals at HMS") 
 
 ggsave("MonthPlot_Rolling.jpg", plot = MonthPlot_Rolling, device = "jpg", dpi = 300, width = 12, height = 6)
 
+MonthPlot_18_21_Rolling <- month_data_Rolling %>% 
+  dplyr::filter(as.numeric(Year) >= 2018) %>%
+  dplyr::filter(as.numeric(Year) <= 2021) %>%
+  ggplot(aes(Month)) + 
+  geom_segment(aes(xend = Month, y = MonthMean, yend = MonthMeanFit)) + 
+  geom_point(aes(y = MonthMean, color = "Actual"), size = 4) +
+  geom_point(aes(y = MonthMeanFit, color = "Prediction"), size = 4) +
+  facet_grid(~Year, space = "free_x", scales = "free_x", switch = "x") + 
+  scale_color_manual(values = c("Train" = "darkgrey", "Test" = "red", "Prediction" = "blue", "Actual" = "red")) +
+  theme_minimal() + 
+  theme(axis.text.x = element_text(size = 9, angle = 90), 
+        axis.text.y = element_text(size = 16),
+        #axis.title.x = element_text(size = 16),
+        axis.title.y = element_text(size = 16),
+        legend.text = element_text(size = 18),
+        legend.title = element_text(size = 0),
+        panel.spacing = unit(0, "lines"), 
+        strip.text = element_text(size = 14), 
+        axis.title.x = element_blank(),
+        strip.placement = "outside") +
+  ylab("Monthly Mean Seals at HMS") 
+
+ggsave("MonthPlot_18_21_Rolling.jpg", plot = MonthPlot_18_21_Rolling, device = "jpg", dpi = 300, width = 12, height = 6)
+
+MonthPlot_Both <- ggarrange(MonthPlot_18_21_Rolling, MonthPlot_Rolling, 
+          labels = c("A", "B"), 
+          ncol = 1, nrow = 2)
+
+ggsave("MonthPlot_Both.jpg", plot = MonthPlot_Both, device = "jpg", dpi = 300, width = 12, height = 10)
 
 
 
@@ -926,8 +954,7 @@ RollingWholePlot <- RollingAverage %>%
         legend.text = element_text(size = 18),
         legend.title = element_text(size = 0),
         panel.background = element_rect(fill = "white")) +
-  ylab("Seals Hauled Out At HMS") +
-  ggtitle("Modeled and Observed Abundances of Harbor Seals at Study Site")
+  ylab("Seals Hauled Out At HMS") 
 
 ggsave("RollingWholePlot.jpg", plot = RollingWholePlot, device = "jpg", dpi = 300, width = 12, height = 6)
 
@@ -946,8 +973,7 @@ RollingWholePlot <- RollingAverage %>%
         legend.text = element_text(size = 18),
         legend.title = element_text(size = 0),
         panel.background = element_rect(fill = "white")) +
-  ylab("Seals Hauled Out At HMS") +
-  ggtitle("Modeled and Observed Abundances of Harbor Seals at Study Site")
+  ylab("Seals Hauled Out At HMS") 
 
 ggsave("RollingWholePlot.jpg", plot = RollingWholePlot, device = "jpg", dpi = 300, width = 12, height = 6)
 
@@ -1078,8 +1104,7 @@ ForestPlot <- ggplot(coef_df, aes(y = term, x = Estimate, xmin = Estimate - 1.96
   xlab("Coefficient Estimate (95% CI)") +
   ylab("1-yr Time-Lagged Terms") +
   scale_y_discrete(labels = custom_labels) +
-  theme_minimal() +
-  ggtitle("GAM Estimate Results")
+  theme_minimal() 
 
 ggsave(ForestPlot, filename = "ForestPlot.jpg", 
        width = 8, height = 6, units = "in") 
@@ -1098,6 +1123,37 @@ ModelPlot_ABC <- ggarrange(RollingWholePlot, RollingFitTestPlot, RollingFitTestP
 ggsave(ModelPlot_ABC, filename = "ModelPlot_ABC.jpg", 
        width = 12, height = 12, units = "in") 
 
+
+#T-Test plot - if you update the analysis, you'll need to rebuild this dataframe!!
+
+Rolling_18_21
+Rolling_22_23
+
+# Add a column for color based on P value
+tsummary <- data.frame(
+  Period = factor(c("Pre-Roadwork Test", "Roadwork Test"), levels = c("Pre-Roadwork Test", "Roadwork Test")),
+  Average = c(-0.807, -23.5),
+  Lower = c(-3.58, -25.5),
+  Upper = c(1.96, -21.49),
+  P = c(0.567, 2.20e-16)
+)
+
+# Add a factor for significance based on P value
+tsummary$Significance <- factor(ifelse(tsummary$P < 0.05, "Significant", "Non-significant"),
+                            levels = c("Non-significant", "Significant"))
+
+# Plot
+T_Test_Plot <- ggplot(tsummary, aes(x = Period, y = Average, ymin = Lower, ymax = Upper, color = Significance)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  geom_errorbar(width = 0.1, color = "black") +
+  geom_point(size = 4) +
+  scale_color_manual(values = c("Non-significant" = "blue", "Significant" = "red")) +
+  theme_minimal() +
+  labs(x = "Period",
+       y = "Average Predicted minus Observed") +
+  theme(legend.title = element_blank(), legend.position = "right")
+
+ggsave("T_Test_Plot.jpg", plot = T_Test_Plot, device = "jpg", dpi = 300, width = 6, height = 5)
 ```
 
 ```{R}
@@ -1180,8 +1236,7 @@ TrendPlot <- SealsTrend_df %>%
         legend.text = element_text(size = 18),
         legend.title = element_text(size = 0),
         panel.background = element_rect(fill = "white")) +
-  ylab("Decomposed Trend of Seals Hauled Out At HMS") +
-  ggtitle("Decomposed Trend of Abundances of Harbor Seals at Study Site")
+  ylab("Decomposed Trend of Seals Hauled Out At HMS") 
 
 ggsave(TrendPlot, filename = "TrendPlot.jpg", 
        width = 10, height = 6, units = "in") 
@@ -1194,11 +1249,12 @@ ggsave(TrendPlot, filename = "TrendPlot.jpg",
 
 YearLag_p_values <- c(Annual_22_23$p.value, Annual_18_21$p.value, Rolling_22_23$p.value, Rolling_18_21$p.value)
 
-Rolling_p_values <- c(Rolling_22_23$p.value, Rolling_18_21$p.value)
+Rolling_p_values_uncorrected <- c(Rolling_22_23$p.value, Rolling_18_21$p.value)
 
 p_adjust_year_lags <- p.adjust(YearLag_p_values, method = "BH")
 print(p_adjust_year_lags)
 
-p_only_rolling <- p.adjust(Rolling_p_values, method = "BH")
+p_only_rolling_corrected <- p.adjust(Rolling_p_values, method = "BH")
 print(p_only_rolling)
 ```
+
