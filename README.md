@@ -1,5 +1,5 @@
 # HarborSealMixedMethods
-Data Repository for data and code used in "Negative Impact of Onshore Construction Noise on Marine Mammal Populations Informed by Local Ecological Knowledge and Statistical Modeling "
+Data Repository for data and code used in "Silencing the Shore: The Effects of Onshore Anthropogenic Noise on Marine Mammal Abundances Informed by Mixed Methods"
 
 Contents include:
 1) WestBeachClean.csv --> raw harbor seal abundance data as collected in Pearse, et al. (2023)
